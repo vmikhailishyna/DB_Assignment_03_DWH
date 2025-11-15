@@ -196,7 +196,7 @@ SELECT
   product_name,
   category,
   price,
-  CURRENT_DATE() AS start_date,
+  DATE('2023-01-01') AS start_date,
   DATE('9999-12-31') AS end_date,
   TRUE AS is_current
 FROM dataset.menu_clean;
@@ -307,7 +307,9 @@ ON o.customer_id = c.customer_id
 LEFT JOIN dataset.dim_staff s 
 ON o.staff_id = s.staff_id
 LEFT JOIN dataset.dim_product p
-ON o.product_id = CAST(p.product_id AS INT64);
+ON o.product_id = CAST(p.product_id AS INT64)
+AND o.order_date >= p.start_date
+AND o.order_date < p.end_date;
 ```
 
 
