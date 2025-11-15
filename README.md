@@ -96,6 +96,84 @@ VALUES
 
 <img width="1606" height="485" alt="image" src="https://github.com/user-attachments/assets/493d929d-af93-4b12-9d74-394b8597cadd" />
 
+## Data cleaning
+
+```
+CREATE OR REPLACE TABLE dataset.orders_clean AS
+SELECT DISTINCT
+  SAFE_CAST(REGEXP_EXTRACT(order_id, r'(\d+)') AS INT64) AS order_id,
+  customer_id,
+  staff_id,
+  SAFE_CAST(REGEXP_EXTRACT(product_id, r'(\d+)') AS INT64) AS product_id,
+  SAFE_CAST(REGEXP_EXTRACT(quantity, r'(\d+)') AS INT64) AS quantity,
+  COALESCE(
+    SAFE.PARSE_DATE('%Y-%m-%d', REPLACE(order_date, '/', '-')),
+    SAFE.PARSE_DATE('%d-%m-%Y', REPLACE(order_date, '/', '-'))
+  ) AS order_date
+FROM dataset.raw_orders
+WHERE staff_id IS NOT NULL
+  AND order_id IS NOT NULL
+  AND customer_id IS NOT NULL
+  AND product_id IS NOT NULL
+  AND quantity IS NOT NULL;
+
+SELECT * FROM dataset.orders_clean;
+
+
+CREATE OR REPLACE TABLE dataset.staff_clean AS
+SELECT DISTINCT
+  staff_id,
+  TRIM(staff_name) AS staff_name,
+  role,
+  COALESCE(
+    SAFE.PARSE_DATE('%Y-%m-%d', REPLACE(hire_date, '/', '-')),
+    SAFE.PARSE_DATE('%d-%m-%Y', REPLACE(hire_date, '/', '-'))
+  ) AS hire_date
+FROM dataset.raw_staff
+WHERE staff_id IS NOT NULL
+  AND staff_name IS NOT NULL
+  AND role IS NOT NULL
+  AND hire_date IS NOT NULL;
+
+SELECT * FROM dataset.staff_clean;
+
+CREATE OR REPLACE TABLE dataset.menu_clean AS
+SELECT DISTINCT
+product_id,
+product_name,
+CASE 
+WHEN category IS NULL AND LOWER(REGEXP_EXTRACT(TRIM(product_name), r'(\S+)$')) = 'tea' 
+THEN 'Tea'
+ELSE COALESCE(TRIM(category), 'Unknown')
+END AS category,
+SAFE_CAST(REGEXP_REPLACE(price, r'[^0-9.]', '') AS FLOAT64) AS price
+FROM dataset.raw_menu
+WHERE product_id IS NOT NULL
+AND product_name IS NOT NULL
+AND price IS NOT NULL;
+
+SELECT * FROM dataset.menu_clean;
+
+CREATE OR REPLACE TABLE dataset.customer_clean AS
+SELECT DISTINCT
+customer_id,
+TRIM(customer_name) AS customer_name,
+CASE
+WHEN phone IS NULL THEN NULL
+ELSE REGEXP_REPLACE(REGEXP_REPLACE(phone, r'[^0-9]', ''),
+                    r'^38', '')
+END AS phone,
+COALESCE(SAFE.PARSE_DATE('%Y-%m-%d', registration_date),
+    SAFE.PARSE_DATE('%d-%m-%Y', registration_date),
+   CURRENT_DATE()
+    ) AS registration_date
+FROM dataset.raw_customers
+WHERE customer_id IS NOT NULL
+AND customer_name IS NOT NULL
+AND registration_date IS NOT NULL
+AND phone IS NOT NULL;
+```
+
 ## Layers
 
 ## Model type
