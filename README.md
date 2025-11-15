@@ -14,6 +14,23 @@ Key business questions:
 
  - Which employees have the greatest impact on sales?
 
+## Data lineage
+
+<img width="1606" height="485" alt="image" src="https://github.com/user-attachments/assets/493d929d-af93-4b12-9d74-394b8597cadd" />
+
+
+## Layers
+
+Raw Layer – original tables as ingested.
+
+Stage Layer (Clean Tables)– duplicates removed, formatting fixed, numeric and date types standardized.
+
+Mart Layer (Dimensional Model) – dimension tables (dim_product, dim_customers, dim_staff) and fact table (fact_orders).
+
+
+## Model type
+<img width="798" height="638" alt="image" src="https://github.com/user-attachments/assets/f391df5a-a880-4b80-bcfb-2ca5e6a94b10" />
+
 ## Source data and table creation
 ```
 -- menu
@@ -91,10 +108,6 @@ VALUES
     ('1001', '2023-10-01', 'C100', 'S01', '1', '1'),
     ('1004', '2023-10-02', 'C102', NULL, '3', '1');
 ```
-
-## Data lineage
-
-<img width="1606" height="485" alt="image" src="https://github.com/user-attachments/assets/493d929d-af93-4b12-9d74-394b8597cadd" />
 
 ## Data cleaning
 
@@ -174,7 +187,6 @@ AND registration_date IS NOT NULL
 AND phone IS NOT NULL;
 ```
 
-## Layers
 ## Dimensions Tabales
 ```
 INSERT INTO dataset.dim_product
@@ -273,10 +285,11 @@ FROM
 
 ```
 
-## Model type
-<img width="798" height="638" alt="image" src="https://github.com/user-attachments/assets/f391df5a-a880-4b80-bcfb-2ca5e6a94b10" />
 
 ## Fact table
+
+Fact table joins dimensions to enable analysis of revenue, products, customers and staff.
+
 ```
 CREATE OR REPLACE TABLE dataset.fact_orders AS
 SELECT
