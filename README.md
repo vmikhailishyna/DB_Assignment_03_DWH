@@ -175,10 +175,126 @@ AND phone IS NOT NULL;
 ```
 
 ## Layers
+## Dimensions Tabales
+```
+INSERT INTO dataset.dim_product
+SELECT
+  ROW_NUMBER() OVER() AS product_sk,
+  product_id,
+  product_name,
+  category,
+  price,
+  CURRENT_DATE() AS start_date,
+  DATE('9999-12-31') AS end_date,
+  TRUE AS is_current
+FROM dataset.menu_clean;
+
+UPDATE dataset.menu_clean
+SET price = 60
+WHERE product_id = '2';
+
+
+MERGE dataset.dim_product dim
+USING dataset.menu_clean stg
+ON dim.product_id = stg.product_id
+   AND dim.is_current = TRUE
+
+WHEN MATCHED AND (
+      dim.product_name != stg.product_name
+   OR dim.category    != stg.category
+   OR dim.price       != stg.price
+)
+THEN
+  UPDATE SET
+    dim.end_date = CURRENT_DATE(),
+    dim.is_current = FALSE
+
+WHEN NOT MATCHED BY TARGET THEN
+  INSERT (
+    product_sk,
+    product_id,
+    product_name,
+    category,
+    price,
+    start_date,
+    end_date,
+    is_current
+  )
+  VALUES (
+    (SELECT IFNULL(MAX(product_sk), 0) + 1 FROM dataset.dim_product),
+    stg.product_id,
+    stg.product_name,
+    stg.category,
+    stg.price,
+    CURRENT_DATE(),
+    DATE('9999-12-31'),
+    TRUE
+  );
+
+INSERT INTO dataset.dim_product
+SELECT
+  (SELECT IFNULL(MAX(product_sk), 0) FROM dataset.dim_product) + ROW_NUMBER() OVER() AS product_sk,
+  stg.product_id,
+  stg.product_name,
+  stg.category,
+  stg.price,
+  CURRENT_DATE() AS start_date,
+  DATE('9999-12-31') AS end_date,
+  TRUE AS is_current
+FROM dataset.menu_clean stg
+WHERE EXISTS (
+  SELECT 1
+  FROM dataset.dim_product dim
+  WHERE dim.product_id = stg.product_id
+    AND dim.is_current = FALSE
+    AND dim.end_date = CURRENT_DATE()
+);
+
+SELECT * FROM dataset.dim_product ORDER BY product_id, start_date;
+
+CREATE OR REPLACE TABLE dataset.dim_customers AS
+SELECT
+  customer_id,
+  customer_name,
+  phone,
+  registration_date
+FROM
+  dataset.customer_clean;
+
+
+CREATE OR REPLACE TABLE dataset.dim_staff AS
+SELECT
+  staff_id,
+  staff_name,
+  role,
+  hire_date
+FROM
+  dataset.staff_clean;
+
+```
 
 ## Model type
 <img width="798" height="638" alt="image" src="https://github.com/user-attachments/assets/f391df5a-a880-4b80-bcfb-2ca5e6a94b10" />
 
 ## Fact table
+```
+CREATE OR REPLACE TABLE dataset.fact_orders AS
+SELECT
+o.order_id,
+o.order_date,
+o.quantity,
+c.customer_id,
+s.staff_id,
+p.product_sk,
+p.price,
+o.quantity * p.price AS total_amount
+from dataset.orders_clean o 
+LEFT JOIN dataset.dim_customers c 
+ON o.customer_id = c.customer_id
+LEFT JOIN dataset.dim_staff s 
+ON o.staff_id = s.staff_id
+LEFT JOIN dataset.dim_product p
+ON o.product_id = CAST(p.product_id AS INT64);
+```
 
-## Dimensions
+
