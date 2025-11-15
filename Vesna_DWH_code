@@ -1,0 +1,277 @@
+-- menu
+
+CREATE OR REPLACE TABLE dataset.raw_menu (
+    product_id STRING,
+    product_name STRING,
+    category STRING,
+    price STRING 
+);
+
+INSERT INTO dataset.raw_menu (product_id, product_name, category, price)
+VALUES
+    ('1', 'Espresso', 'Coffee', '35.00'),
+    ('2', 'Latte', 'Coffee', '55.00'),
+    ('2', 'Latte', 'Coffee', '55.00'),   -- ДУБЛІКАТ
+    ('3', 'Green Tea', NULL, '40'),       -- NULL категорія
+    ('4', 'Croissant', 'Food', '$65.00'), -- Символ '$' (потрібен Regex/Replace)
+    ('5', 'Water', 'Beverage', '25');
+
+
+-- staff
+
+CREATE OR REPLACE TABLE dataset.raw_staff (
+    staff_id STRING,
+    staff_name STRING,
+    role STRING,
+    hire_date STRING 
+);
+
+INSERT INTO dataset.raw_staff (staff_id, staff_name, role, hire_date)
+VALUES
+    ('S01', 'Maria Ivanova', 'Barista', '2023-01-10'),
+    ('S02', '  Oleh   ', 'Manager', '2022-11-15'), -- Зайві пробіли в імені
+    ('S03', 'Anna Petrova', 'Barista', '2023/05/20'), -- Інший формат дати (слеші)
+    ('S01', 'Maria Ivanova', 'Barista', '2023-01-10'),-- ДУБЛІКАТ
+    ('S04', 'Ivan Kozak', NULL, '2023-08-01');        -- NULL роль
+
+
+-- customers
+
+CREATE OR REPLACE TABLE dataset.raw_customers (
+    customer_id STRING,
+    customer_name STRING,
+    phone STRING,
+    registration_date STRING
+);
+
+INSERT INTO dataset.raw_customers (customer_id, customer_name, phone, registration_date)
+VALUES
+    ('C100', 'Dmytro', '+38(050)123-45-67', '2023-09-01'), -- Дужки і тире
+    ('C101', 'Olena', '097 555 44 33', '2023-09-02'),      -- Пробіли
+    ('C102', 'Andrii', 'Tel: 0631112233', '2023-09-03'),   -- Текст 'Tel:'
+    ('C100', 'Dmytro', '+38(050)123-45-67', '2023-09-01'), -- ДУБЛІКАТ
+    ('C103', 'Sofia', NULL, '2023-09-05'),                 -- NULL телефон
+    ('C104', 'Max', '380440000000', NULL);                -- NULL
+
+
+-- orders
+
+CREATE OR REPLACE TABLE dataset.raw_orders (
+    order_id STRING,
+    order_date STRING,
+    customer_id STRING,
+    staff_id STRING,
+    product_id STRING,
+    quantity STRING 
+);
+
+INSERT INTO dataset.raw_orders (order_id, order_date, customer_id, staff_id, product_id, quantity)
+VALUES
+    ('1001', '2023-10-01', 'C100', 'S01', '1', '1'),
+    ('#1002', '2023-10-01', 'C101', 'S02', '2', '2'),       -- Символ '#' в ID
+    ('Ord-1003', '2023-10-01', 'C102', 'S01', '4', '1 pc'), -- Текст в ID та 'pc' в кількості
+    ('1001', '2023-10-01', 'C100', 'S01', '1', '1'),        -- ДУБЛІКАТ
+    ('1004', '2023-10-02', 'C102', NULL, '3', '1');         -- NULL staff
+
+
+CREATE OR REPLACE TABLE dataset.orders_clean AS
+SELECT DISTINCT
+  SAFE_CAST(REGEXP_EXTRACT(order_id, r'(\d+)') AS INT64) AS order_id,
+  customer_id,
+  staff_id,
+  SAFE_CAST(REGEXP_EXTRACT(product_id, r'(\d+)') AS INT64) AS product_id,
+  SAFE_CAST(REGEXP_EXTRACT(quantity, r'(\d+)') AS INT64) AS quantity,
+  COALESCE(
+    SAFE.PARSE_DATE('%Y-%m-%d', REPLACE(order_date, '/', '-')),
+    SAFE.PARSE_DATE('%d-%m-%Y', REPLACE(order_date, '/', '-'))
+  ) AS order_date
+FROM dataset.raw_orders
+WHERE staff_id IS NOT NULL
+  AND order_id IS NOT NULL
+  AND customer_id IS NOT NULL
+  AND product_id IS NOT NULL
+  AND quantity IS NOT NULL;
+
+SELECT * FROM dataset.orders_clean;
+
+
+CREATE OR REPLACE TABLE dataset.staff_clean AS
+SELECT DISTINCT
+  staff_id,
+  TRIM(staff_name) AS staff_name,
+  role,
+  COALESCE(
+    SAFE.PARSE_DATE('%Y-%m-%d', REPLACE(hire_date, '/', '-')),
+    SAFE.PARSE_DATE('%d-%m-%Y', REPLACE(hire_date, '/', '-'))
+  ) AS hire_date
+FROM dataset.raw_staff
+WHERE staff_id IS NOT NULL
+  AND staff_name IS NOT NULL
+  AND role IS NOT NULL
+  AND hire_date IS NOT NULL;
+
+SELECT * FROM dataset.staff_clean;
+
+CREATE OR REPLACE TABLE dataset.menu_clean AS
+SELECT DISTINCT
+product_id,
+product_name,
+CASE 
+WHEN category IS NULL AND LOWER(REGEXP_EXTRACT(TRIM(product_name), r'(\S+)$')) = 'tea' 
+THEN 'Tea'
+ELSE COALESCE(TRIM(category), 'Unknown')
+END AS category,
+SAFE_CAST(REGEXP_REPLACE(price, r'[^0-9.]', '') AS FLOAT64) AS price
+FROM dataset.raw_menu
+WHERE product_id IS NOT NULL
+AND product_name IS NOT NULL
+AND price IS NOT NULL;
+
+SELECT * FROM dataset.menu_clean;
+
+CREATE OR REPLACE TABLE dataset.customer_clean AS
+SELECT DISTINCT
+customer_id,
+TRIM(customer_name) AS customer_name,
+CASE
+WHEN phone IS NULL THEN NULL
+ELSE REGEXP_REPLACE(REGEXP_REPLACE(phone, r'[^0-9]', ''),
+                    r'^38', '')
+END AS phone,
+COALESCE(SAFE.PARSE_DATE('%Y-%m-%d', registration_date),
+    SAFE.PARSE_DATE('%d-%m-%Y', registration_date),
+   CURRENT_DATE()
+    ) AS registration_date
+FROM dataset.raw_customers
+WHERE customer_id IS NOT NULL
+AND customer_name IS NOT NULL;
+
+SELECT * from dataset.customer_clean;
+
+CREATE OR REPLACE TABLE dataset.dim_product (
+    product_sk INT64,
+    product_id STRING,
+    product_name STRING,
+    category STRING,
+    price FLOAT64,
+    start_date DATE,
+    end_date DATE,
+    is_current BOOL
+);
+
+
+INSERT INTO dataset.dim_product
+SELECT
+  ROW_NUMBER() OVER() AS product_sk,
+  product_id,
+  product_name,
+  category,
+  price,
+  CURRENT_DATE() AS start_date,
+  DATE('9999-12-31') AS end_date,
+  TRUE AS is_current
+FROM dataset.menu_clean;
+
+UPDATE dataset.menu_clean
+SET price = 60
+WHERE product_id = '2';
+
+
+MERGE dataset.dim_product dim
+USING dataset.menu_clean stg
+ON dim.product_id = stg.product_id
+   AND dim.is_current = TRUE
+
+WHEN MATCHED AND (
+      dim.product_name != stg.product_name
+   OR dim.category    != stg.category
+   OR dim.price       != stg.price
+)
+THEN
+  UPDATE SET
+    dim.end_date = CURRENT_DATE(),
+    dim.is_current = FALSE
+
+WHEN NOT MATCHED BY TARGET THEN
+  INSERT (
+    product_sk,
+    product_id,
+    product_name,
+    category,
+    price,
+    start_date,
+    end_date,
+    is_current
+  )
+  VALUES (
+    (SELECT IFNULL(MAX(product_sk), 0) + 1 FROM dataset.dim_product),
+    stg.product_id,
+    stg.product_name,
+    stg.category,
+    stg.price,
+    CURRENT_DATE(),
+    DATE('9999-12-31'),
+    TRUE
+  );
+
+INSERT INTO dataset.dim_product
+SELECT
+  (SELECT IFNULL(MAX(product_sk), 0) FROM dataset.dim_product) + ROW_NUMBER() OVER() AS product_sk,
+  stg.product_id,
+  stg.product_name,
+  stg.category,
+  stg.price,
+  CURRENT_DATE() AS start_date,
+  DATE('9999-12-31') AS end_date,
+  TRUE AS is_current
+FROM dataset.menu_clean stg
+WHERE EXISTS (
+  SELECT 1
+  FROM dataset.dim_product dim
+  WHERE dim.product_id = stg.product_id
+    AND dim.is_current = FALSE
+    AND dim.end_date = CURRENT_DATE()
+);
+
+SELECT * FROM dataset.dim_product ORDER BY product_id, start_date;
+
+CREATE OR REPLACE TABLE dataset.dim_customers AS
+SELECT
+  customer_id,
+  customer_name,
+  phone,
+  registration_date
+FROM
+  dataset.customer_clean;
+
+
+CREATE OR REPLACE TABLE dataset.dim_staff AS
+SELECT
+  staff_id,
+  staff_name,
+  role,
+  hire_date
+FROM
+  dataset.staff_clean;
+
+
+CREATE OR REPLACE TABLE dataset.fact_orders AS
+SELECT
+o.order_id,
+o.order_date,
+o.quantity,
+c.customer_id,
+s.staff_id,
+p.product_sk,
+p.price,
+o.quantity * p.price AS total_amount
+from dataset.orders_clean o 
+LEFT JOIN dataset.dim_customers c 
+ON o.customer_id = c.customer_id
+LEFT JOIN dataset.dim_staff s 
+ON o.staff_id = s.staff_id
+LEFT JOIN dataset.dim_product p
+ON o.product_id = CAST(p.product_id AS INT64)
+AND p.is_current = TRUE;
+
+SELECT * FROM dataset.fact_orders;
